@@ -99,3 +99,7 @@ p { line-height: 1.6; }
 @media (prefers-reduced-motion: reduce) {
   .card, .sheet { animation: none; }
 }
+
+
+/* Hides the "Powered by Netlify" badge injected by the host */
+#nl-badge-frame{display:none!important}
