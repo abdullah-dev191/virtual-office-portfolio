@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "people": "node scripts/build-people.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",
