@@ -66,4 +66,5 @@ p { line-height: 1.6; }
 .contact b { font-weight: 500; font-size: 14.5px; overflow-wrap: anywhere; }
 .contact i { font-style: normal; color: var(--green); }
 
-
+/* Hides the "Powered by Netlify" badge injected by the host */
+#nl-badge-frame{display:none!important}

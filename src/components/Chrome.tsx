@@ -182,7 +182,7 @@ export function Toolbar({
         </button>
       )}
       <button className="pillbtn" onClick={onDemo}>
-        {demo ? "Stop demo" : "Watch demo ↗"}
+        {demo ? "Stop" : (<><span className="hide-sm">Watch demo</span><span className="show-sm">Demo</span> ↗</>)}
       </button>
     </div>
   );

@@ -129,7 +129,7 @@ export function RoomCard({
           Reception
         </button>
       </div>
-      <p className="hint-keys">Esc stands you up.</p>
+      <p className="hint-keys hide-touch">Esc stands you up.</p>
     </aside>
   );
 }

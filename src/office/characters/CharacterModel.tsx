@@ -145,6 +145,8 @@ export function CharacterModel({ puppet, look, label, tone = "role", labelRange 
 
   const cur = useRef<{ name: ClipName; key: number; action: AnimationAction } | null>(null);
   const gaze = useRef({ yaw: 0, pitch: 0, tyaw: 0, tpitch: 0, w: 0 });
+  /** The animated (turn-free) rotations of the neck and head. */
+  const base = useMemo(() => ({ neck: new Quaternion(), head: new Quaternion() }), []);
 
   const play = (name: ClipName, key: number, rate: number, fade: number) => {
     const next = rig.actions.get(name);
@@ -166,6 +168,8 @@ export function CharacterModel({ puppet, look, label, tone = "role", labelRange 
     cur.current = null;
     play(puppet.anim, puppet.animKey, puppet.rate, 0);
     rig.mixer.update(0);
+    base.neck.copy(rig.neck.quaternion);
+    base.head.copy(rig.head.quaternion);
     return () => {
       rig.mixer.stopAllAction();
     };
@@ -184,7 +188,13 @@ export function CharacterModel({ puppet, look, label, tone = "role", labelRange 
     const c = cur.current;
     if (!c || c.name !== p.anim || c.key !== p.animKey) play(p.anim, p.animKey, p.rate, FADE[p.anim] ?? DEFAULT_FADE);
     else if (c.action.timeScale !== p.rate) c.action.timeScale = p.rate;
+    // Undo last frame's head turn first: the mixer only rewrites bones whose clip value changed, so a turn
+    // added on top of the pose would otherwise pile up every frame and spin the neck.
+    rig.neck.quaternion.copy(base.neck);
+    rig.head.quaternion.copy(base.head);
     rig.mixer.update(Math.min(dt, 0.1));
+    base.neck.copy(rig.neck.quaternion);
+    base.head.copy(rig.head.quaternion);
 
     // head turn towards a point of interest
     const gz = gaze.current;
@@ -226,7 +236,7 @@ export function CharacterModel({ puppet, look, label, tone = "role", labelRange 
       )}
       <group ref={tag}>
         {text && (near || tone === "you" || bubble) && (
-          <Html center zIndexRange={[40, 10]} style={{ pointerEvents: "none" }}>
+          <Html center zIndexRange={[4, 0]} style={{ pointerEvents: "none" }}>
             <div className={`pill ${bubble ? "bubble" : tone}`}>{text}</div>
           </Html>
         )}

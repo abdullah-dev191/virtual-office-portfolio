@@ -206,7 +206,7 @@ export default function Scene({ director, rig, traffic, game, quality, visitorLo
 
   return (
     <Canvas
-      shadows={q.shadows > 0}
+      shadows={q.shadows > 0 ? "percentage" : false}
       dpr={[1, q.dpr]}
       camera={{ fov: 36, near: 0.4, far: 800, position: [0, 150, 160] }}
       gl={{ antialias: q.aa, powerPreference: "high-performance" }}

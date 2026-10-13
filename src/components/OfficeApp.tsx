@@ -327,7 +327,10 @@ export function OfficeApp() {
       {phase === "leaving" && <VisitCard eyebrow="LEAVING" title="Heading out…" sub="Thanks for stopping by." onSkip={skip} />}
       {phase === "outside" && <GoodbyeCard onEnter={() => director.reenter()} onClassic={() => setMode("classic")} />}
       {phase === "seated" && seated && <RoomCard dept={seated} focus={focus} onStand={() => director.standUp()} onNext={goTo} onReception={() => goTo("reception")} onBossSaved={onBossSaved} />}
-      {phase === "free" && <p className="hint">WASD, arrow keys or tap the floor to walk. Walk up to a table to sit down.</p>}
+      {phase === "free" && <p className="hint">
+          <span className="hide-touch">WASD, arrow keys or tap the floor to walk.</span>
+          <span className="show-touch">Tap the floor to walk.</span> Walk up to a table to sit down.
+        </p>}
 
       {ready && phase !== "intro" && (
         <Toolbar preset={preset} panMode={panMode} following={following} demo={demo} onZoom={(k) => rig.zoomBy(k)} onPan={onPan} onPreset={onPreset} onFollow={follow} onDemo={runDemo} />
