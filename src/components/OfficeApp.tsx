@@ -301,7 +301,7 @@ export function OfficeApp() {
   const showPlaces = phase !== "intro";
 
   return (
-    <div className="office">
+    <div className="office" data-seated={phase === "seated" ? "" : undefined}>
       <div className="canvas">
         <Scene
           key={quality}
@@ -322,8 +322,8 @@ export function OfficeApp() {
       {showPlaces && <PlaceList current={current} onGo={goTo} onPreset={onPreset} open={placesOpen} onToggle={() => setPlacesOpen((v) => !v)} />}
 
       {phase === "intro" && ready && <WelcomeCard lookId={lookId} onLook={setLook} onSkip={skip} />}
-      {phase === "reception" && <ReceptionCard onRoom={goTo} onBoss={() => goTo("boss")} onExplore={() => director.explore()} />}
-      {phase === "visit" && <VisitCard title={target || "On the move"} sub={status} onSkip={skip} />}
+      {phase === "reception" && following && <ReceptionCard onRoom={goTo} onBoss={() => goTo("boss")} onExplore={() => director.explore()} />}
+      {phase === "visit" && following && <VisitCard title={target || "On the move"} sub={status} onSkip={skip} />}
       {phase === "leaving" && <VisitCard eyebrow="LEAVING" title="Heading out…" sub="Thanks for stopping by." onSkip={skip} />}
       {phase === "outside" && <GoodbyeCard onEnter={() => director.reenter()} onClassic={() => setMode("classic")} />}
       {phase === "seated" && seated && <RoomCard dept={seated} focus={focus} onStand={() => director.standUp()} onNext={goTo} onReception={() => goTo("reception")} onBossSaved={onBossSaved} />}

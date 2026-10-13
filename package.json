@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "tsx scripts/check-routes.ts",
     "build": "next build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "check-routes": "tsx scripts/check-routes.ts",
     "people": "node scripts/build-people.mjs"
   },
   "dependencies": {

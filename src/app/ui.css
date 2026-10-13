@@ -93,3 +93,14 @@
   .card, .sheet { animation: none; }
   * { scroll-behavior: auto !important; }
 }
+
+.chip, .brand { white-space: nowrap; }
+@media (max-width: 759px) {
+  .topbar { top: 10px; left: 10px; right: 10px; }
+  .chip { padding: 8px 10px; letter-spacing: .06em; }
+  .brand { padding: 8px 10px; letter-spacing: .12em; }
+}
+@media (max-width: 759px) {
+  .office[data-seated] .toolbar { display: none; }
+  .sheet { height: 62vh; bottom: 10px; }
+}
