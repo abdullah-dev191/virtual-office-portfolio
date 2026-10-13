@@ -1,269 +1,343 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Director, type Step } from "@/office/director";
-import { DESK_BACK, GATE_IN, GATE_OUT, LOBBY, START, doors, roomAt, rooms, roomOrder, type RoomId, type V2 } from "@/office/layout";
-import { findPath, stepAside, trimEnd } from "@/office/nav";
-import { ClassicView } from "./ClassicView";
-import { RoomBody, roomMeta } from "./Rooms";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { departments, tour, type DeptId, type PlaceId } from "@/content/departments";
 import { profile } from "@/content/profile";
+import type { Preset } from "@/office/camera";
+import { sexOf } from "@/office/characters/rig";
+import { visitorLooks } from "@/office/characters/roster";
+import type { Phase } from "@/office/director";
+import { hostSeat, visitorSeat } from "@/office/layout";
+import { QUALITY, autoQuality, type Quality } from "@/office/quality";
+import { sim } from "@/office/sim";
+import { GoodbyeCard, ReceptionCard, RoomCard, VisitCard, WelcomeCard } from "./Cards";
+import { PlaceList, TopBar, Toolbar } from "./Chrome";
+import { ClassicView } from "./ClassicView";
 
 const Scene = dynamic(() => import("@/office/world/Scene"), { ssr: false });
 
-type Card = { eyebrow: string; title: string; sub?: string; skip?: string } | null;
-type Phase = "intro" | "menu" | "walk" | "free" | "exit";
+type Mode = "boot" | "office" | "classic";
+const QUALITY_KEY = "office.quality";
+const LOOK_KEY = "office.look";
+
+function hasWebGL() {
+  try {
+    const c = document.createElement("canvas");
+    return !!(c.getContext("webgl2") || c.getContext("webgl"));
+  } catch {
+    return false;
+  }
+}
+
+function readStore(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writeStore(key: string, v: string) {
+  try {
+    localStorage.setItem(key, v);
+  } catch {
+    // storage unavailable: settings last for this visit only
+  }
+}
 
 export function OfficeApp() {
-  const director = useMemo(() => new Director(), []);
+  const [mode, setMode] = useState<Mode>("boot");
+  const [webgl, setWebgl] = useState(false);
+  const [reduced, setReduced] = useState(false);
+  const [quality, setQuality] = useState<Quality>("high");
+  const [lookId, setLookId] = useState(visitorLooks[0].id);
+  const [ready, setReady] = useState(false);
   const [phase, setPhase] = useState<Phase>("intro");
-  const [card, setCard] = useState<Card>({ eyebrow: "WELCOME", title: "Welcome to the office", sub: "Security is opening the gate…" });
-  const [sheet, setSheet] = useState<RoomId | null>(null);
+  const [place, setPlace] = useState<PlaceId | null>(null);
+  const [seated, setSeated] = useState<DeptId | null>(null);
+  const [status, setStatus] = useState("");
+  const [target, setTarget] = useState<string>("");
+  const [preset, setPreset] = useState<Preset | null>(null);
+  const [panMode, setPanMode] = useState(false);
+  const [following, setFollowing] = useState(true);
+  const [demo, setDemo] = useState(false);
   const [focus, setFocus] = useState<number | null>(null);
-  const [pBubble, setPBubble] = useState<string | null>(null);
-  const [gBubble, setGBubble] = useState<string | null>(null);
-  const [classic, setClassic] = useState(false);
-  const [webgl, setWebgl] = useState<boolean | null>(null);
+  const [placesOpen, setPlacesOpen] = useState(false);
+  const [wide, setWide] = useState(true);
+  const demoRef = useRef(false);
 
-  const showMenu = useCallback(() => {
-    setPhase("menu");
-    setCard(null);
-    setSheet(null);
+  const look = useMemo(() => visitorLooks.find((l) => l.id === lookId) ?? visitorLooks[0], [lookId]);
+  const { director, rig } = sim;
+  useEffect(() => {
+    sim.director.setVisitorSex(sexOf(look.look.body));
+  }, [look]);
+
+  // first client render: decide between the office and the classic page
+  useEffect(() => {
+    const gl = hasWebGL();
+    const rm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const q = (readStore(QUALITY_KEY) as Quality | null) ?? autoQuality();
+    const l = readStore(LOOK_KEY);
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setWebgl(gl);
+    setReduced(rm);
+    if (q in QUALITY) {
+      sim.setQuality(q);
+      setQuality(q);
+    }
+    if (l && visitorLooks.some((v) => v.id === l)) setLookId(l);
+    setWide(window.innerWidth >= 760);
+    setMode(gl && !rm ? "office" : "classic");
+    /* eslint-enable react-hooks/set-state-in-effect */
+    const onResize = () => setWide(window.innerWidth >= 760);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
-
-  const openRoom = useCallback((id: RoomId) => {
-    setSheet((s) => (s === id ? s : id));
-    setCard(null);
-    setPhase("free");
-  }, []);
-
-  const intro = useCallback(() => {
-    setPhase("intro");
-    setSheet(null);
-    setCard({ eyebrow: "WELCOME", title: "Welcome to the office", sub: "Security is opening the gate…" });
-    director.run([
-      { t: "wait", ms: 1600 },
-      { t: "fn", fn: () => director.setGate(true) },
-      { t: "wait", ms: 900 },
-      { t: "fn", fn: () => setCard({ eyebrow: "WELCOME", title: "Walking to reception…", skip: "Skip to reception ↗" }) },
-      { t: "walk", path: [START, GATE_OUT, GATE_IN, LOBBY] },
-      { t: "fn", fn: showMenu },
-    ]);
-  }, [director, showMenu]);
 
   useEffect(() => {
-    const c = document.createElement("canvas");
-    const ok = !!(c.getContext("webgl2") || c.getContext("webgl"));
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setWebgl(ok);
-    if (!ok) {
-      setClassic(true);
-      return;
-    }
-    director.setZoneHandler((z) => {
-      if (z) openRoom(z);
-      else setSheet(null);
-    });
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      director.setGate(true);
-      director.placePlayer(LOBBY);
-      showMenu();
-    } else intro();
-    return () => {
-      director.setZoneHandler(undefined);
-    };
-  }, [director, intro, openRoom, showMenu]);
+    sim.rig.cardSide = wide ? "right" : "bottom";
+  }, [wide]);
 
-  /** Walk to the inside of a door, push it open into the corridor, step through and let it swing shut. */
-  const leaveSteps = (id: RoomId): Step[] => {
-    const d = doors[id];
-    const here: V2 = [director.player.x, director.player.z];
-    return [
-      { t: "walk", path: findPath(here, d.inn) },
-      { t: "turn", yaw: d.faceIn },
-      { t: "fn", fn: () => director.openDoor(id, -1) },
-      { t: "wait", ms: 1000 },
-      { t: "walk", path: [d.inn, d.c, d.out, d.clear] },
-      { t: "fn", fn: () => director.closeDoor(id) },
+  // director events -> UI state and camera framing
+  useEffect(() => {
+    const offs = [
+      director.on("phase", (p) => {
+        setPhase(p);
+        if (p !== "seated") setSeated(null);
+        if (p === "visit" || p === "leaving") {
+          if (rig.mode === "seated") rig.follow();
+        }
+      }),
+      director.on("place", setPlace),
+      director.on("status", setStatus),
+      director.on("seated", (d) => {
+        setSeated(d);
+        const s = visitorSeat(d);
+        const h = hostSeat(d);
+        rig.setSeated(s.position, h ? h.position : null);
+        setFollowing(true);
+        setPreset(null);
+        setPanMode(false);
+      }),
+      director.on("stood", () => {
+        setSeated(null);
+        rig.follow();
+      }),
     ];
+    return () => offs.forEach((off) => off());
+  }, [director, rig]);
+
+  // start walking in once the people have loaded
+  const started = useRef(false);
+  useEffect(() => {
+    if (mode !== "office" || !ready || started.current) return;
+    started.current = true;
+    sim.director.reducedMotion = reduced;
+    sim.rig.reduced = reduced;
+    if (reduced) sim.rig.follow();
+    else sim.rig.startIntro();
+    sim.director.startIntro();
+  }, [mode, ready, reduced]);
+
+  const follow = useCallback(() => {
+    rig.follow();
+    setFollowing(true);
+    setPreset(null);
+    setPanMode(false);
+  }, [rig]);
+
+  const goTo = useCallback(
+    (p: PlaceId) => {
+      setPlacesOpen(false);
+      setTarget(p === "reception" ? "Back to reception" : departments[p].name);
+      follow();
+      if (p === "reception") director.toReception();
+      else director.goTo(p);
+    },
+    [director, follow],
+  );
+
+  const skip = useCallback(() => {
+    rig.skipIntro();
+    director.skip();
+  }, [director, rig]);
+
+  const stopDemo = useCallback(() => {
+    demoRef.current = false;
+    setDemo(false);
+  }, []);
+
+  const runDemo = useCallback(async () => {
+    if (demoRef.current) return stopDemo();
+    demoRef.current = true;
+    setDemo(true);
+    if (director.phase === "intro") skip();
+    const waitSeated = (d: DeptId) =>
+      new Promise<void>((res) => {
+        const off = director.on("seated", (v) => {
+          if (v === d) {
+            off();
+            res();
+          }
+        });
+        window.setTimeout(() => {
+          off();
+          res();
+        }, 120_000);
+      });
+    const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+    for (const d of tour) {
+      if (!demoRef.current) return;
+      const seatedHere = waitSeated(d);
+      goTo(d);
+      await seatedHere;
+      if (!demoRef.current) return;
+      await sleep(5500);
+    }
+    if (demoRef.current) goTo("reception");
+    stopDemo();
+  }, [director, goTo, skip, stopDemo]);
+
+  const onPreset = useCallback(
+    (p: Preset) => {
+      setPlacesOpen(false);
+      if (preset === p) return follow();
+      rig.setPreset(p);
+      setPreset(p);
+      setPanMode(false);
+      setFollowing(false);
+    },
+    [follow, preset, rig],
+  );
+
+  const onPan = useCallback(() => {
+    if (panMode) return follow();
+    rig.startPan();
+    setPanMode(true);
+    setPreset(null);
+    setFollowing(false);
+  }, [follow, panMode, rig]);
+
+  const onProject = useCallback(
+    (i: number) => {
+      setFocus(i);
+      if (seated !== "work") goTo("work");
+    },
+    [goTo, seated],
+  );
+
+  const onBossSaved = useCallback(() => {
+    window.setTimeout(() => goTo("lounge"), 900);
+  }, [goTo]);
+
+  // keyboard: Esc stands up when seated (or skips a walk); walking keys bring the camera back
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (mode !== "office" || (e.target as HTMLElement | null)?.closest("textarea, input")) return;
+      if (e.key === "Escape") {
+        if (director.visitor.seat) director.standUp();
+        else if (director.busy) skip();
+      } else if (/^(Arrow(Up|Down|Left|Right)|[wasdWASD])$/.test(e.key) && !following) follow();
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [director, mode, skip, following, follow]);
+
+  const setQ = (q: Quality) => {
+    writeStore(QUALITY_KEY, q);
+    sim.setQuality(q);
+    setQuality(q);
+  };
+  const setLook = (id: string) => {
+    writeStore(LOOK_KEY, id);
+    setLookId(id);
   };
 
-  const visit = (id: RoomId) => {
-    setSheet(null);
-    setFocus(null);
-    const here: V2 = [director.player.x, director.player.z];
-    const cur = roomAt(here[0], here[1]);
-    if (cur === id) {
-      openRoom(id);
-      return;
-    }
-    setPhase("walk");
-    const room = rooms[id];
-    const d = doors[id];
-    const eyebrow = "YOUR VISIT";
-    const title = id === "boss" ? "Boss Cabin" : room.name;
-    const steps: Step[] = [];
-    if (cur) steps.push(...leaveSteps(cur));
-    const start: V2 = cur ? doors[cur].clear : here;
+  const sr = (
+    <div className="sr-only">
+      <h1>
+        {profile.name}, {profile.role}
+      </h1>
+      <p>
+        {profile.summary} {profile.summaryHighlight}
+        {profile.summaryEnd}
+      </p>
+    </div>
+  );
 
-    // The receptionist only walks you over when you start from the lobby.
-    const withGuide = start[1] > 3;
-    let guideWalk: V2[] | undefined;
-    if (withGuide) {
-      const lead = trimEnd(findPath(DESK_BACK, d.out), 2.8);
-      guideWalk = [...lead, stepAside(lead)];
-      director.summonGuide();
-    }
-    setCard({ eyebrow, title, sub: withGuide ? `Follow your receptionist to ${title}.` : `Heading to ${title}.`, skip: "Skip walk ↗" });
-    steps.push({ t: "walk", path: findPath(start, d.out), guide: guideWalk, lead: guideWalk ? 1.1 : 0 });
-    steps.push({ t: "turn", yaw: d.face });
-    if (id === "boss") {
-      steps.push(
-        { t: "fn", fn: () => { setCard({ eyebrow, title, sub: "Knocking on the boss cabin.", skip: "Skip walk ↗" }); setPBubble("KNOCK KNOCK"); director.player.reach = 1.6; } },
-        { t: "wait", ms: 1700 },
-        { t: "fn", fn: () => { setPBubble(null); setGBubble("Please come in"); } },
-        { t: "wait", ms: 1100 },
-        { t: "fn", fn: () => setGBubble(null) },
-      );
-    }
-    steps.push(
-      { t: "fn", fn: () => { setCard({ eyebrow, title, sub: "Opening the door.", skip: "Skip walk ↗" }); director.openDoor(id, 1); } },
-      { t: "wait", ms: 1000 },
-      { t: "walk", path: [d.out, d.c, d.inn, ...findPath(d.inn, room.dest).slice(1)] },
-      { t: "fn", fn: () => { director.closeDoor(id); director.sendGuideHome(); openRoom(id); } },
+  if (mode === "classic")
+    return (
+      <ClassicView
+        onEnter={webgl ? () => setMode("office") : undefined}
+        note={
+          !webgl
+            ? "Your browser cannot show the 3D office, so here is the classic view."
+            : reduced
+              ? "Reduced motion is on, so the office opens as a plain page. You can still enter the 3D office; it will skip the camera moves."
+              : undefined
+        }
+      />
     );
-    director.run(steps);
-  };
 
-  const back = () => {
-    setSheet(null);
-    setPhase("walk");
-    setCard({ eyebrow: "YOUR VISIT", title: "Back to reception", skip: "Skip walk ↗" });
-    const here: V2 = [director.player.x, director.player.z];
-    const cur = roomAt(here[0], here[1]);
-    const steps: Step[] = cur ? leaveSteps(cur) : [];
-    const start: V2 = cur ? doors[cur].clear : here;
-    steps.push({ t: "walk", path: findPath(start, LOBBY) }, { t: "fn", fn: showMenu });
-    director.run(steps);
-  };
-
-  /** Leave through the front gate, which closes behind you, then offer to come back in. */
-  const exitOffice = () => {
-    setSheet(null);
-    setFocus(null);
-    setPhase("walk");
-    setCard({ eyebrow: "LEAVING", title: "Heading out…", sub: "Thanks for stopping by.", skip: "Skip walk ↗" });
-    const here: V2 = [director.player.x, director.player.z];
-    const cur = roomAt(here[0], here[1]);
-    director.sendGuideHome();
-    const steps: Step[] = cur ? leaveSteps(cur) : [];
-    const start: V2 = cur ? doors[cur].clear : here;
-    steps.push(
-      { t: "fn", fn: () => director.setGate(true) },
-      { t: "walk", path: [...findPath(start, GATE_IN), GATE_OUT, [0, 16]] },
-      { t: "fn", fn: () => director.setGate(false) },
-      { t: "wait", ms: 900 },
-      { t: "fn", fn: () => { setPhase("exit"); setCard(null); } },
+  if (mode === "boot")
+    return (
+      <div className="office">
+        <div className="loader" role="status">
+          Opening the office…
+        </div>
+        {sr}
+        <noscript>
+          <ClassicView />
+        </noscript>
+      </div>
     );
-    director.run(steps);
-  };
 
-  const reenter = () => {
-    director.reset();
-    intro();
-  };
-
-  const skip = () => director.skip();
-
-  if (classic) return <ClassicView onClose={webgl ? () => setClassic(false) : undefined} />;
+  const inside = phase !== "intro" && phase !== "outside" && phase !== "leaving";
+  const current = seated ?? place;
+  const showPlaces = phase !== "intro";
 
   return (
     <div className="office">
       <div className="canvas">
-        <Scene director={director} onProject={(i) => { setFocus(i); openRoom("work"); }} playerBubble={pBubble} guideBubble={gBubble} />
+        <Scene
+          key={quality}
+          director={director}
+          rig={rig}
+          traffic={sim.traffic}
+          game={sim.game}
+          quality={quality}
+          visitorLook={look.look}
+          panMode={panMode}
+          onProject={onProject}
+          onReady={() => setReady(true)}
+        />
       </div>
 
-      <div className="hud">
-        <span className="hud-label">INTERACTIVE OFFICE</span>
-        <div className="hud-right">
-          <button className="pillbtn ghost" onClick={() => setClassic(true)}>Classic view</button>
-          {phase !== "intro" && phase !== "exit" && phase !== "walk" && (
-            <button className="pillbtn" onClick={exitOffice}>Exit office ↗</button>
-          )}
-        </div>
-      </div>
+      <TopBar place={current} quality={quality} onQuality={setQ} onClassic={() => setMode("classic")} onExit={inside ? () => director.exit() : undefined} />
 
-      {card && (
-        <div className="card" role="status" aria-live="polite">
-          <p className="eyebrow">{card.eyebrow}</p>
-          <h2>{card.title}</h2>
-          {card.sub && <p className="sub">{card.sub}</p>}
-          {card.skip && (
-            <button className="pillbtn" onClick={skip}>{card.skip}</button>
-          )}
-        </div>
+      {showPlaces && <PlaceList current={current} onGo={goTo} onPreset={onPreset} open={placesOpen} onToggle={() => setPlacesOpen((v) => !v)} />}
+
+      {phase === "intro" && ready && <WelcomeCard lookId={lookId} onLook={setLook} onSkip={skip} />}
+      {phase === "reception" && <ReceptionCard onRoom={goTo} onBoss={() => goTo("boss")} onExplore={() => director.explore()} />}
+      {phase === "visit" && <VisitCard title={target || "On the move"} sub={status} onSkip={skip} />}
+      {phase === "leaving" && <VisitCard eyebrow="LEAVING" title="Heading out…" sub="Thanks for stopping by." onSkip={skip} />}
+      {phase === "outside" && <GoodbyeCard onEnter={() => director.reenter()} onClassic={() => setMode("classic")} />}
+      {phase === "seated" && seated && <RoomCard dept={seated} focus={focus} onStand={() => director.standUp()} onNext={goTo} onReception={() => goTo("reception")} onBossSaved={onBossSaved} />}
+      {phase === "free" && <p className="hint">WASD, arrow keys or tap the floor to walk. Walk up to a table to sit down.</p>}
+
+      {ready && phase !== "intro" && (
+        <Toolbar preset={preset} panMode={panMode} following={following} demo={demo} onZoom={(k) => rig.zoomBy(k)} onPan={onPan} onPreset={onPreset} onFollow={follow} onDemo={runDemo} />
       )}
 
-      {phase === "menu" && !sheet && (
-        <div className="card menu">
-          <p className="eyebrow">RECEPTION</p>
-          <h2>Where to, {profile.name.split(" ")[0]}&apos;s visitor?</h2>
-          <p className="sub">Pick a room and your receptionist will walk you there.</p>
-          <div className="grid">
-            {roomOrder.filter((r) => r !== "boss").map((r) => (
-              <button key={r} className="choice" onClick={() => visit(r)}>
-                <b>{rooms[r].name}</b>
-                <span>{roomMeta[r].title}</span>
-              </button>
-            ))}
-          </div>
-          <div className="row">
-            <button className="pillbtn" onClick={() => visit("boss")}>Meet the boss · knock first ↗</button>
-            <button className="pillbtn ghost" onClick={() => { setPhase("free"); setCard(null); }}>Just exploring ↗</button>
-          </div>
+      {!ready && (
+        <div className="loader" role="status">
+          Opening the office…
         </div>
       )}
-
-      {phase === "exit" && (
-        <div className="card menu">
-          <p className="eyebrow">GOODBYE</p>
-          <h2>Thanks for visiting</h2>
-          <p className="sub">You are outside the office. Come back in any time, or read the plain version of the portfolio.</p>
-          <div className="row">
-            <button className="pillbtn" onClick={reenter}>Enter again ↗</button>
-            <button className="pillbtn ghost" onClick={() => setClassic(true)}>Classic view</button>
-          </div>
-        </div>
-      )}
-
-      {phase === "free" && !sheet && (
-        <div className="chips">
-          <button className="pillbtn" onClick={back}>Reception ↗</button>
-          {roomOrder.map((r) => (
-            <button key={r} className="pillbtn ghost" onClick={() => visit(r)}>{r === "boss" ? "Boss" : rooms[r].name}</button>
-          ))}
-          <span className="hint">WASD, arrow keys or tap the floor to walk</span>
-        </div>
-      )}
-
-      {sheet && (
-        <aside className="sheet" aria-label={roomMeta[sheet].title}>
-          <p className="eyebrow">{roomMeta[sheet].eyebrow}</p>
-          <h2>{roomMeta[sheet].title}</h2>
-          <p className="sub">{roomMeta[sheet].sub}</p>
-          <div className="body"><RoomBody id={sheet} focus={focus} /></div>
-          <div className="row">
-            <button className="pillbtn" onClick={back}>Back to reception ↗</button>
-            <button className="pillbtn ghost" onClick={() => setSheet(null)}>Keep exploring</button>
-            <button className="pillbtn ghost" onClick={exitOffice}>Exit office</button>
-          </div>
-        </aside>
-      )}
-
-      <div className="sr-only">
-        <h1>{profile.name}, {profile.role}</h1>
-        <p>{profile.summary} {profile.summaryHighlight}{profile.summaryEnd}</p>
-      </div>
+      <p className="sr-only" aria-live="polite">
+        {status}
+      </p>
+      {sr}
     </div>
   );
 }

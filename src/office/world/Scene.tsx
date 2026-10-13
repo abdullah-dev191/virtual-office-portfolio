@@ -1,65 +1,184 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
-import { Object3D, type DirectionalLight } from "three";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { Suspense, useEffect, useMemo, useRef } from "react";
+import { BackSide, Fog, Object3D, type DirectionalLight, type Mesh, type PerspectiveCamera } from "three";
+import type { CameraRig } from "../camera";
+import type { Look } from "../characters/looks";
 import type { Director } from "../director";
+import type { Football } from "../football";
+import type { Traffic } from "../traffic";
 import { Building } from "./Building";
-import { Outdoor } from "./Outdoor";
-import { Person, RECEPTIONIST } from "./People";
+import { City } from "./City";
+import { Entrance } from "./Entrance";
+import { FootballView } from "./Football";
+import { Interior } from "./Interior";
+import { People } from "./People";
+import { skyGradient } from "./textures";
+import { TrafficView } from "./Traffic";
+import { QUALITY, type Quality } from "../quality";
 
-function Rig({ director }: { director: Director }) {
-  const light = useRef<DirectionalLight>(null);
+export type { Quality } from "../quality";
+
+type Sim = { director: Director; rig: CameraRig; traffic: Traffic; game: Football };
+
+/** Advances every simulation, then places the camera, the sun and the fog for this frame. */
+function Driver({ director, rig, traffic, game, shadowSize }: Sim & { shadowSize: number }) {
+  const sun = useRef<DirectionalLight>(null);
   const target = useMemo(() => new Object3D(), []);
-  const look = useRef({ x: 0, z: 22 });
-
+  const sky = useRef<Mesh>(null);
   useFrame((state, dt) => {
     director.update(dt);
-    const p = director.player;
-    const k = Math.min(1, dt * 4);
-    look.current.x += (p.x - look.current.x) * k;
-    look.current.z += (p.z - look.current.z) * k;
-    const { x, z } = look.current;
-    const aspect = state.size.width / state.size.height;
-    const s = aspect < 1 ? 1 + (1 - aspect) * 0.95 : 1;
-    state.camera.position.set(x, 15 * s, z + 11.5 * s);
-    state.camera.lookAt(x, 0.6, z + 2.6);
-    if (light.current) {
-      light.current.position.set(x + 9, 22, z + 8);
-      target.position.set(x, 0, z);
-      target.updateMatrixWorld();
+    traffic.update(dt, director.visitor);
+    game.update(dt);
+    const cam = state.camera as PerspectiveCamera;
+    const f = rig.update(dt, director.visitor, { width: state.size.width, height: state.size.height, fov: cam.fov });
+    cam.position.set(f.x, f.y, f.z);
+    cam.lookAt(f.tx, f.ty, f.tz);
+    const d = rig.distance;
+    const far = Math.max(500, d * 5);
+    if (Math.abs(cam.far - far) > 1) {
+      cam.far = far;
+      cam.updateProjectionMatrix();
     }
-  });
-
+    const fog = state.scene.fog;
+    if (fog instanceof Fog) {
+      fog.near = d * 1.7 + 40;
+      fog.far = d * 3.6 + 160;
+    }
+    if (sky.current) sky.current.position.copy(cam.position);
+    if (sun.current) {
+      sun.current.position.set(f.tx + 28, 52, f.tz + 22);
+      target.position.set(f.tx, 0, f.tz);
+      target.updateMatrixWorld();
+      const s = Math.min(70, Math.max(18, d * 0.75));
+      const sc = sun.current.shadow.camera;
+      if (sc.right !== s) {
+        sc.left = -s;
+        sc.right = s;
+        sc.top = s;
+        sc.bottom = -s;
+        sc.updateProjectionMatrix();
+      }
+    }
+  }, -1);
   return (
     <>
+      <fog attach="fog" args={["#E3ECE4", 120, 420]} />
+      <mesh ref={sky} renderOrder={-1}>
+        <sphereGeometry args={[1400, 24, 12]} />
+        <meshBasicMaterial map={skyGradient()} side={BackSide} fog={false} depthWrite={false} />
+      </mesh>
+      <hemisphereLight args={["#FFFFFF", "#B7C6AE", 1.05]} />
+      <ambientLight intensity={0.32} />
       <primitive object={target} />
       <directionalLight
-        ref={light}
+        ref={sun}
         target={target}
-        intensity={2.1}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-20}
-        shadow-camera-right={20}
-        shadow-camera-top={20}
-        shadow-camera-bottom={-20}
+        color="#FFF1DC"
+        intensity={2.3}
+        castShadow={shadowSize > 0}
+        shadow-mapSize={[shadowSize || 512, shadowSize || 512]}
+        shadow-bias={-0.0005}
+        shadow-normalBias={0.03}
         shadow-camera-near={1}
-        shadow-camera-far={70}
-        shadow-bias={-0.0004}
+        shadow-camera-far={160}
       />
     </>
   );
 }
 
-type Props = {
-  director: Director;
+/** Click or tap the ground to walk; drag to pan in "Move view"; wheel or pinch to zoom. */
+function Controls({ director, rig, panMode }: { director: Director; rig: CameraRig; panMode: boolean }) {
+  const gl = useThree((s) => s.gl);
+  const camera = useThree((s) => s.camera) as PerspectiveCamera;
+  const size = useThree((s) => s.size);
+  const drag = useRef({ down: false, x: 0, y: 0, moved: 0 });
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef(0);
+  const view = useRef({ panMode, size, fov: camera.fov });
+  const fov = camera.fov;
+  useEffect(() => {
+    view.current = { panMode, size, fov };
+  }, [panMode, size, fov]);
+
+  useEffect(() => {
+    const el = gl.domElement;
+    const down = (e: PointerEvent) => {
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      drag.current = { down: true, x: e.clientX, y: e.clientY, moved: 0 };
+    };
+    const move = (e: PointerEvent) => {
+      const prev = pointers.current.get(e.pointerId);
+      if (!prev) return;
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.current.size === 2) {
+        const [a, b] = [...pointers.current.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinch.current) rig.zoomBy(pinch.current / d);
+        pinch.current = d;
+        drag.current.moved = 99;
+        return;
+      }
+      const dx = e.clientX - prev.x;
+      const dy = e.clientY - prev.y;
+      drag.current.moved += Math.abs(dx) + Math.abs(dy);
+      const v = view.current;
+      if (drag.current.down && (v.panMode || drag.current.moved > 12)) {
+        if (!v.panMode && rig.mode !== "pan") return;
+        rig.panBy(dx, dy, { width: v.size.width, height: v.size.height, fov: v.fov });
+      }
+    };
+    const up = (e: PointerEvent) => {
+      pointers.current.delete(e.pointerId);
+      if (pointers.current.size < 2) pinch.current = 0;
+      drag.current.down = false;
+    };
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault();
+      rig.zoomBy(e.deltaY > 0 ? 1.1 : 1 / 1.1);
+    };
+    el.addEventListener("pointerdown", down);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    el.addEventListener("wheel", wheel, { passive: false });
+    return () => {
+      el.removeEventListener("pointerdown", down);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      el.removeEventListener("wheel", wheel);
+    };
+  }, [gl, rig]);
+
+  const click = (e: ThreeEvent<MouseEvent>) => {
+    if (panMode || drag.current.moved > 8) return;
+    director.moveTo(e.point.x, e.point.z);
+  };
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]} onClick={click}>
+      <planeGeometry args={[400, 400]} />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} colorWrite={false} />
+    </mesh>
+  );
+}
+
+type Props = Sim & {
+  quality: Quality;
+  visitorLook: Look;
+  panMode: boolean;
   onProject: (i: number) => void;
-  playerBubble: string | null;
-  guideBubble: string | null;
+  onReady: () => void;
 };
 
-export default function Scene({ director, onProject, playerBubble, guideBubble }: Props) {
+function Ready({ onReady }: { onReady: () => void }) {
+  useEffect(() => onReady(), [onReady]);
+  return null;
+}
+
+export default function Scene({ director, rig, traffic, game, quality, visitorLook, panMode, onProject, onReady }: Props) {
+  const q = QUALITY[quality];
   useEffect(() => {
     const map: Record<string, keyof Director["keys"]> = {
       ArrowUp: "up", w: "up", W: "up",
@@ -70,46 +189,42 @@ export default function Scene({ director, onProject, playerBubble, guideBubble }
     const set = (v: boolean) => (e: KeyboardEvent) => {
       const k = map[e.key];
       if (!k) return;
-      if ((e.target as HTMLElement | null)?.closest("input,textarea")) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("input, textarea, select, [contenteditable]")) return;
       director.setKey(k, v);
       if (v) e.preventDefault();
     };
     const dn = set(true);
-    const up = set(false);
+    const upk = set(false);
     window.addEventListener("keydown", dn);
-    window.addEventListener("keyup", up);
+    window.addEventListener("keyup", upk);
     return () => {
       window.removeEventListener("keydown", dn);
-      window.removeEventListener("keyup", up);
+      window.removeEventListener("keyup", upk);
     };
   }, [director]);
 
-  const click = (e: ThreeEvent<MouseEvent>) => {
-    if (director.busy) return;
-    director.moveTo(e.point.x, e.point.z);
-  };
-
   return (
     <Canvas
-      shadows
-      dpr={[1, 1.75]}
-      camera={{ fov: 36, near: 0.5, far: 200, position: [0, 15, 33.5] }}
-      gl={{ antialias: true, powerPreference: "high-performance" }}
-      aria-label="Interactive 3D office. Use the menu or click to walk."
+      shadows={q.shadows > 0}
+      dpr={[1, q.dpr]}
+      camera={{ fov: 36, near: 0.4, far: 800, position: [0, 150, 160] }}
+      gl={{ antialias: q.aa, powerPreference: "high-performance" }}
+      aria-label="Interactive 3D office. Use the place list or click the floor to walk."
     >
-      <color attach="background" args={["#DDEBE3"]} />
-      <fog attach="fog" args={["#DDEBE3", 55, 110]} />
-      <hemisphereLight args={["#FFFFFF", "#B9C8B0", 1.0]} />
-      <ambientLight intensity={0.55} />
-      <Rig director={director} />
-      <Outdoor director={director} />
-      <Building director={director} onProject={onProject} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]} onClick={click}>
-        <planeGeometry args={[160, 160]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-      </mesh>
-      <Person actor={director.guide} label={guideBubble ? undefined : "RECEPTIONIST"} bubble={guideBubble} {...RECEPTIONIST} />
-      <Person actor={director.player} label="YOU" tone="you" bubble={playerBubble} shirt="#2E4D41" pants="#2B3A55" skin="#C98E6A" hair="#1C1A19" sleeves="short" />
+      <color attach="background" args={["#E3ECE4"]} />
+      <Driver director={director} rig={rig} traffic={traffic} game={game} shadowSize={q.shadows} />
+      <City />
+      <Entrance director={director} />
+      <Building director={director} />
+      <Interior director={director} onProject={onProject} />
+      <Suspense fallback={null}>
+        <People director={director} visitorLook={visitorLook} staffLimit={q.staff} />
+        <TrafficView traffic={traffic} />
+        <FootballView game={game} />
+        <Ready onReady={onReady} />
+      </Suspense>
+      <Controls director={director} rig={rig} panMode={panMode} />
     </Canvas>
   );
 }

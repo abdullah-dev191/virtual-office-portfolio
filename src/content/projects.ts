@@ -1,5 +1,7 @@
 export type Project = {
   name: string;
+  /** Short line for the poster in the Work Studio. */
+  tagline: string;
   stack: string;
   description: string;
   mine: string;
@@ -11,6 +13,7 @@ export type Project = {
 export const projects: Project[] = [
   {
     name: "Total Party Planner",
+    tagline: "Catering and events platform",
     stack: "React",
     description: "A web platform for catering and event management.",
     mine: "I worked on event and menu management, proposal generation, and BEO and invoice generation, plus the calendar and accounting integrations.",
@@ -18,7 +21,8 @@ export const projects: Project[] = [
   },
   {
     name: "Custory",
-    stack: "React",
+    tagline: "Creative consultancy, Singapore",
+    stack: "React · Full stack",
     description:
       "A Singapore creative consultancy that combines brand strategy, content and campaigns, web design, custom merchandise and creator collaborations. It works in three phases: Research & Alignment, Execution, and Tracking & Optimization.",
     mine: "I work on it as a full stack developer, building the React frontend and the backend behind it.",
@@ -28,7 +32,8 @@ export const projects: Project[] = [
   },
   {
     name: "Concord Seminar",
-    stack: "Next.js, NestJS",
+    tagline: "Dental continuing education",
+    stack: "Next.js, NestJS, PostgreSQL · Full stack",
     description:
       "A dental continuing education provider with over 300 courses a year, delivered as live webinars, seminars and on-demand courses for dentists and dental hygienists. Courses carry PACE and ADA CERP CEU credit.",
     mine: "I work on it as a full stack developer: a Next.js frontend for presenting course content and handling user interaction, and a NestJS backend with a PostgreSQL database.",
@@ -38,6 +43,7 @@ export const projects: Project[] = [
   },
   {
     name: "GeoWise",
+    tagline: "AI booking and dispatch",
     stack: "Next.js",
     description:
       "An AI booking and dispatch platform for field service businesses such as cleaning, HVAC, plumbing and pest control. It takes bookings through a WhatsApp AI receptionist, a booking widget and phone, then routes staff by service zone. Available in Arabic and English.",
@@ -48,7 +54,8 @@ export const projects: Project[] = [
   },
   {
     name: "Invoice Maker",
-    stack: "React Native",
+    tagline: "Invoicing app for iOS and Android",
+    stack: "React Native · Full stack",
     description: "A cross-platform mobile invoicing app for iOS and Android.",
     mine: "I work on it as a full stack developer: the React Native screens for creating, managing and tracking invoices, clients and payments from a single codebase, plus the backend behind them.",
     tags: ["Invoices", "Clients", "Payments", "iOS and Android"],
