@@ -1,339 +1,256 @@
 "use client";
 
-import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { RepeatWrapping, type Group } from "three";
-import { projects } from "@/content/projects";
-import { skillGroups } from "@/content/experience";
-import { profile } from "@/content/profile";
+import { useMemo, useRef } from "react";
+import { DoubleSide, type Group, type Texture } from "three";
 import type { Director } from "../director";
-import { DOOR_W, doors, walls, WALL_T, workstations, type Door, type Wall } from "../layout";
-import { Person, RECEPTIONIST } from "./People";
-import { Box, C, Cyl, Plane, Sign, makeTexture, useTextTexture, type V3 } from "./primitives";
-import { Bookshelf, Cabinet, Chair, Desk, Plant, Rack, Sofa } from "./props";
+import { smooth, wrapAngle } from "../geom";
+import { ENTRANCE, WALL_H, WALL_T, doors, walls, type Door, type Wall } from "../layout";
+import { makeBuilders, type GeoBuilder } from "./builder";
+import { glassMat, glowMat, solidMat } from "./materials";
+import { P } from "./props";
+import { textBoard, tileFloor, woodFloor } from "./textures";
 
-function WallSegment({ w }: { w: Wall }) {
+const CREAM = "#EFECE4";
+const FRAME = "#22262A";
+
+/** Floor patches: [x0, z0, x1, z1, texture, tint]. */
+type Patch = [number, number, number, number, "wood" | "warm" | "walnut" | "tile" | "dark", number];
+const floors: Patch[] = [
+  [-9, 0, 9, 10, "wood", 0.006],
+  [-9, -11, 9, 0, "tile", 0.006],
+  [-9, -19, -6, -11, "tile", 0.006],
+  [6, -19, 9, -11, "tile", 0.006],
+  [-6, -19, 6, -11, "walnut", 0.007],
+  [-21, -10, -9, 0, "wood", 0.006],
+  [-21, -19, -9, -10, "wood", 0.006],
+  [-21, 0, -9, 10, "warm", 0.006],
+  [9, 0, 21, 10, "dark", 0.006],
+  [9, -10, 21, 0, "wood", 0.006],
+  [9, -19, 21, -10, "tile", 0.006],
+];
+
+function floorTexture(kind: Patch[4]): Texture {
+  switch (kind) {
+    case "wood":
+      return woodFloor("#E8DCC6");
+    case "warm":
+      return woodFloor("#E2C9A6");
+    case "walnut":
+      return woodFloor("#9C7352");
+    case "dark":
+      return tileFloor("#BCC3C6");
+    case "tile":
+      return tileFloor("#E4E6E3");
+  }
+}
+
+function Floor({ p }: { p: Patch }) {
+  const [x0, z0, x1, z1, kind, y] = p;
+  const w = x1 - x0;
+  const d = z1 - z0;
+  const tex = useMemo(() => {
+    const t = floorTexture(kind).clone();
+    t.needsUpdate = true;
+    const tile = kind === "tile" || kind === "dark" ? 1.6 : 3.2;
+    t.repeat.set(w / tile, d / tile);
+    return t;
+  }, [kind, w, d]);
+  return (
+    <mesh position={[(x0 + x1) / 2, y, (z0 + z1) / 2]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      <planeGeometry args={[w, d]} />
+      <meshStandardMaterial map={tex} roughness={0.9} />
+    </mesh>
+  );
+}
+
+function wallShapes(b: { solid: GeoBuilder; glass: GeoBuilder; glow: GeoBuilder }, w: Wall) {
   const [ax, az] = w.a;
   const [bx, bz] = w.b;
-  const horizontal = Math.abs(az - bz) < 0.001;
   const len = Math.hypot(bx - ax, bz - az);
-  const cx = (ax + bx) / 2;
-  const cz = (az + bz) / 2;
-  const size = (h: number, t = WALL_T): V3 => (horizontal ? [len, h, t] : [t, h, len]);
-  if (w.kind === "low") {
-    return (
-      <group position={[cx, 0, cz]}>
-        <Box p={[0, 0.55, 0]} s={size(1.1)} c={C.wall} />
-        <Box p={[0, 1.13, 0]} s={size(0.07, WALL_T + 0.1)} c={C.wood} />
-      </group>
-    );
-  }
-  return (
-    <group position={[cx, 0, cz]}>
-      <Box p={[0, 1.15, 0]} s={size(2.2, 0.04)} c={C.glass} opacity={0.22} cast={false} receive={false} />
-      <Box p={[0, 2.27, 0]} s={size(0.08, 0.1)} c={C.metal} />
-      <Box p={[0, 0.06, 0]} s={size(0.12, 0.12)} c={C.wood} />
-    </group>
-  );
+  const yaw = Math.atan2(bx - ax, bz - az);
+  const t = WALL_T[w.kind];
+  const h = WALL_H[w.kind];
+  b.solid.at({ x: (ax + bx) / 2, z: (az + bz) / 2, yaw }, () => {
+    if (w.kind === "glass") {
+      b.glass.box(0, h / 2 + 0.05, 0, 0.03, h - 0.1, len, "#CFE3E8");
+      b.solid.box(0, h, 0, 0.07, 0.07, len, FRAME);
+      b.solid.box(0, 0.05, 0, t, 0.1, len, FRAME);
+      const n = Math.max(1, Math.round(len / 1.5));
+      for (let i = 0; i <= n; i++) b.solid.box(0, h / 2, -len / 2 + (i * len) / n, 0.05, h, 0.04, FRAME);
+      b.solid.box(0, 1.02, 0, 0.035, 0.035, len, FRAME);
+    } else if (w.kind === "boundary") {
+      b.solid.box(0, h / 2, 0, t, h, len, "#F7F6F1");
+      b.solid.box(0, h + 0.04, 0, t + 0.08, 0.08, len + 0.02, "#E2DED3");
+      const n = Math.max(1, Math.round(len / 4));
+      for (let i = 0; i <= n; i++) b.solid.box(0, (h + 0.25) / 2, -len / 2 + (i * len) / n, t + 0.12, h + 0.25, 0.42, "#F7F6F1");
+    } else {
+      b.solid.box(0, h / 2, 0, t, h, len, CREAM);
+      b.solid.box(0, h + 0.035, 0, t + 0.1, 0.07, len + 0.02, P.oak);
+      b.solid.box(0, 0.06, 0, t + 0.04, 0.12, len, "#CFC8B8");
+      if (w.kind === "back") {
+        // tall back wall: a row of windows on the inner (south) face
+        const n = Math.floor(len / 3.5);
+        for (let i = 0; i < n; i++) {
+          const zc = -len / 2 + (i + 0.5) * (len / n);
+          b.solid.box(-t / 2 - 0.01, 1.75, zc, 0.02, 1.5, 1.9, FRAME);
+          b.glow.box(-t / 2 - 0.025, 1.75, zc, 0.01, 1.38, 1.78, "#BFD8E2");
+        }
+      }
+    }
+  });
 }
 
-/** Frame, threshold and swinging leaf for one doorway. The leaf angle comes from the director so it matches collisions. */
+/** Ceiling lights hanging over the work areas (glowing panels and pendants). */
+function lights(b: { solid: GeoBuilder; glass: GeoBuilder; glow: GeoBuilder }) {
+  const panel = (x: number, z: number, w: number, d: number) => {
+    b.solid.box(x - w / 2 + 0.1, 3.0, z, 0.01, 0.5, 0.01, FRAME);
+    b.solid.box(x + w / 2 - 0.1, 3.0, z, 0.01, 0.5, 0.01, FRAME);
+    b.solid.box(x, 2.74, z, w + 0.04, 0.03, d + 0.04, "#DADDD9");
+    b.glow.box(x, 2.72, z, w, 0.02, d, "#FFF6E3");
+  };
+  const pendant = (x: number, z: number) => {
+    b.solid.box(x, 3.0, z, 0.012, 0.6, 0.012, FRAME);
+    b.solid.cyl(x, 2.55, z, 0.2, 0.16, P.green, 18, 0.06);
+    b.glow.cyl(x, 2.53, z, 0.17, 0.02, "#FFF1D6", 18);
+  };
+  for (const [x, z] of [[-4.6, -2.6], [-4.6, -7.6], [4.6, -2.6], [4.6, -7.6]]) panel(x, z, 2.2, 0.32);
+  for (const x of [-15.9, -14.5]) pendant(x, -5);
+  for (const x of [14.4, 16.4]) pendant(x, -5);
+  pendant(-15, -14.5);
+  pendant(0, -15.8);
+  pendant(16, -14.5);
+  panel(14.8, 3.1, 2.6, 0.3);
+  pendant(-1.2, 5.0);
+  pendant(1.2, 5.0);
+  pendant(-18.3, 5.0);
+}
+
 function DoorUnit({ d, director }: { d: Door; director: Director }) {
   const leaf = useRef<Group>(null);
-  const horizontal = d.dir[0] !== 0;
-  const L = DOOR_W - 0.06;
-  const ax = (a: number, h: number, t: number): V3 => (horizontal ? [a, h, t] : [t, h, a]);
-  const at = (a: number, y: number, o = 0): V3 => (horizontal ? [a, y, o] : [o, y, a]);
+  const plaque = useMemo(
+    () => textBoard(`plaque:${d.id}`, 512, 112, "#2E4D41", [{ text: d.plaque, size: 46, spacing: 6, color: "#F3F0E8" }]),
+    [d],
+  );
+  const outYaw = wrapAngle(d.inYaw + Math.PI);
   useFrame(() => {
-    const g = leaf.current;
-    if (!g) return;
-    const o = director.door[d.id].open;
-    const u = Math.abs(o);
-    g.rotation.y = d.swing * Math.sign(o) * u * u * (3 - 2 * u);
+    if (!leaf.current) return;
+    const k = smooth(director.doors[d.id].open);
+    leaf.current.rotation.y = d.shutYaw + wrapAngle(d.openYaw - d.shutYaw) * k;
   });
-  const half = DOOR_W / 2 + 0.05;
+  const L = d.width - 0.04;
   return (
     <group>
-      <group position={[d.c[0], 0, d.c[1]]}>
-        <Box p={at(-half, 1.1)} s={ax(0.1, 2.2, 0.16)} c={C.woodDark} />
-        <Box p={at(half, 1.1)} s={ax(0.1, 2.2, 0.16)} c={C.woodDark} />
-        <Box p={at(0, 2.2)} s={ax(DOOR_W + 0.2, 0.16, 0.16)} c={C.woodDark} />
-        <Box p={at(0, 0.01)} s={ax(DOOR_W, 0.02, 0.26)} c={C.metal} />
+      {/* frame */}
+      <group position={[d.centre[0], 0, d.centre[1]]} rotation={[0, d.shutYaw, 0]}>
+        <mesh position={[0, 1.1, -d.width / 2 - 0.03]} castShadow>
+          <boxGeometry args={[0.16, 2.2, 0.08]} />
+          <meshStandardMaterial color={P.oakDark} roughness={0.7} />
+        </mesh>
+        <mesh position={[0, 1.1, d.width / 2 + 0.03]} castShadow>
+          <boxGeometry args={[0.16, 2.2, 0.08]} />
+          <meshStandardMaterial color={P.oakDark} roughness={0.7} />
+        </mesh>
+        <mesh position={[0, 2.24, 0]} castShadow>
+          <boxGeometry args={[0.16, 0.1, d.width + 0.14]} />
+          <meshStandardMaterial color={P.oakDark} roughness={0.7} />
+        </mesh>
       </group>
+      {/* name plaque above the frame, on the corridor side */}
+      <mesh position={[d.centre[0] + Math.sin(outYaw) * 0.09, 2.5, d.centre[1] + Math.cos(outYaw) * 0.09]} rotation={[0, outYaw, 0]}>
+        <planeGeometry args={[1.25, 0.27]} />
+        <meshStandardMaterial map={plaque} roughness={0.6} />
+      </mesh>
+      {/* leaf: hinged at the post, swings into the room */}
       <group position={[d.hinge[0], 0, d.hinge[1]]}>
-        <group ref={leaf}>
-          <Box p={at(L / 2 + 0.03, 1.04)} s={ax(L, 2.08, 0.05)} c={C.wood} />
-          <Box p={at(L / 2 + 0.03, 1.5)} s={ax(L * 0.5, 0.95, 0.07)} c={C.glass} opacity={0.5} cast={false} />
-          <Box p={at(L / 2 + 0.03, 0.12)} s={ax(L - 0.1, 0.2, 0.07)} c={C.woodDark} />
-          <Box p={at(L - 0.12, 1.0)} s={ax(0.14, 0.04, 0.14)} c={C.metal} />
+        <group ref={leaf} rotation={[0, d.shutYaw, 0]}>
+          <mesh position={[0, 1.06, L / 2 + 0.02]} castShadow>
+            <boxGeometry args={[0.05, 2.1, L]} />
+            <meshStandardMaterial color={P.oak} roughness={0.65} />
+          </mesh>
+          <mesh position={[0, 1.42, L / 2 + 0.02]}>
+            <boxGeometry args={[0.056, 0.9, L * 0.42]} />
+            <meshStandardMaterial color="#CFE3E8" transparent opacity={0.55} roughness={0.1} side={DoubleSide} />
+          </mesh>
+          <mesh position={[0, 1.0, L - 0.12]}>
+            <boxGeometry args={[0.14, 0.04, 0.12]} />
+            <meshStandardMaterial color={P.chrome} metalness={0.6} roughness={0.3} />
+          </mesh>
         </group>
       </group>
     </group>
   );
 }
 
-function BladeSign({ x, z, text, w = 1.9 }: { x: number; z: number; text: string; w?: number }) {
+/** Automatic sliding glass doors in the main entrance. */
+function EntranceDoors({ director }: { director: Director }) {
+  const left = useRef<Group>(null);
+  const right = useRef<Group>(null);
+  const half = (ENTRANCE.x1 - ENTRANCE.x0) / 2;
+  useFrame(() => {
+    const k = smooth(director.entrance.open);
+    if (left.current) left.current.position.x = -half / 2 - k * half * 0.95;
+    if (right.current) right.current.position.x = half / 2 + k * half * 0.95;
+  });
   return (
-    <group position={[x, 2.75, z]}>
-      <Box p={[0, 0.45, 0]} s={[0.04, 0.5, 0.04]} c={C.metal} />
-      <Sign p={[0, 0, 0]} text={text} w={w} h={0.5} size={34} />
-    </group>
-  );
-}
-
-function Poster({ i, onProject }: { i: number; onProject: (i: number) => void }) {
-  const pr = projects[i];
-  const tones = ["#8FB1A6", "#D6A58A", "#E1CE95", "#9FB3C9", "#A9B99B"];
-  const tex = useTextTexture([...pr.name.toUpperCase().replace("TOTAL PARTY PLANNER", "PARTY PLANNER").replace("CONCORD SEMINAR", "CONCORD\nSEMINAR").replace("INVOICE MAKER", "INVOICE\nMAKER").split("\n"), "", pr.stack.split(", ")[0]], { w: 280, h: 340, bg: tones[i % tones.length], fg: "#26352F", size: 30, spacing: 0 });
-  return (
-    <group position={[-16.1 + i * 1.8, 1.55, -6.1]}>
-      <Box s={[1.5, 1.8, 0.04]} c={C.white} />
-      <mesh position={[0, 0, 0.025]} onClick={() => onProject(i)} onPointerOver={() => (document.body.style.cursor = "pointer")} onPointerOut={() => (document.body.style.cursor = "")}>
-        <planeGeometry args={[1.38, 1.68]} />
-        <meshStandardMaterial map={tex} roughness={0.9} />
+    <group position={[0, 0, ENTRANCE.z]}>
+        <group ref={left}>
+          <mesh position={[0, 1.15, 0]}>
+            <boxGeometry args={[half, 2.3, 0.04]} />
+            <meshStandardMaterial color="#CFE3E8" transparent opacity={0.4} roughness={0.08} side={DoubleSide} />
+          </mesh>
+          <mesh position={[0, 2.31, 0]}>
+            <boxGeometry args={[half, 0.05, 0.06]} />
+            <meshStandardMaterial color={FRAME} />
+          </mesh>
+          <mesh position={[1 * (half / 2 - 0.03), 1.15, 0]}>
+            <boxGeometry args={[0.04, 2.3, 0.06]} />
+            <meshStandardMaterial color={FRAME} />
+          </mesh>
+        </group>
+        <group ref={right}>
+          <mesh position={[0, 1.15, 0]}>
+            <boxGeometry args={[half, 2.3, 0.04]} />
+            <meshStandardMaterial color="#CFE3E8" transparent opacity={0.4} roughness={0.08} side={DoubleSide} />
+          </mesh>
+          <mesh position={[0, 2.31, 0]}>
+            <boxGeometry args={[half, 0.05, 0.06]} />
+            <meshStandardMaterial color={FRAME} />
+          </mesh>
+          <mesh position={[-1 * (half / 2 - 0.03), 1.15, 0]}>
+            <boxGeometry args={[0.04, 2.3, 0.06]} />
+            <meshStandardMaterial color={FRAME} />
+          </mesh>
+        </group>
+      <mesh position={[0, 2.45, 0]}>
+        <boxGeometry args={[ENTRANCE.x1 - ENTRANCE.x0 + 0.5, 0.25, 0.3]} />
+        <meshStandardMaterial color={FRAME} />
       </mesh>
     </group>
   );
 }
 
-function WorkStudio({ onProject }: { onProject: (i: number) => void }) {
-  return (
-    <group>
-      <Box p={[-12.5, 1.3, -6.3]} s={[9.6, 2.5, 0.2]} c={C.wood} />
-      {projects.map((_, i) => (
-        <Poster key={i} i={i} onProject={onProject} />
-      ))}
-      {[-14.4, -11.2].map((x) => (
-        <group key={x}>
-          <Desk p={[x, 0.05, -2.7]} w={2} d={1} />
-          <Chair p={[x, 0, -1.5]} c={C.terracotta} />
-        </group>
-      ))}
-      <Cabinet p={[-17.4, 0, -0.5]} r={[0, Math.PI / 2, 0]} w={2} />
-      <Plant p={[-17, 0, 1.2]} s={1.1} />
-      <Plant p={[-8.2, 0, -5.4]} s={0.9} />
-      <BladeSign x={-6.1} z={-2} text="WORK STUDIO" />
-    </group>
-  );
-}
-
-function TechLab() {
-  const lines = useMemo(() => skillGroups.flatMap((g) => [g.title.toUpperCase(), g.items.slice(0, 4).join(" · ")]), []);
-  const tex = useTextTexture(["TOOLKIT", ...lines.slice(0, 6)], { w: 560, h: 360, bg: "#FAFAF7", fg: "#26352F", size: 26, spacing: 1, align: "left" });
-  return (
-    <group>
-      {[9.2, 10.3, 11.4, 12.5, 13.6, 14.7].map((x) => (
-        <Rack key={x} p={[x, 0, -5.9]} />
-      ))}
-      <Box p={[12, 0.78, -0.9]} s={[4, 0.08, 1]} c={C.wood} />
-      <Box p={[10.1, 0.39, -0.9]} s={[0.08, 0.78, 0.9]} c={C.metal} />
-      <Box p={[13.9, 0.39, -0.9]} s={[0.08, 0.78, 0.9]} c={C.metal} />
-      <Box p={[11, 0.95, -0.9]} s={[0.5, 0.3, 0.04]} c="#22272B" emissive="#7FB5C9" ei={0.4} />
-      <Box p={[13, 0.95, -0.9]} s={[0.5, 0.3, 0.04]} c="#22272B" emissive="#9AD4A5" ei={0.4} />
-      <Chair p={[11, 0, 0.5]} c={C.terracotta} />
-      <group position={[15.6, 0, -3.4]}>
-        <Box p={[0, 1.55, 0]} s={[2.9, 1.9, 0.08]} c={C.metal} />
-        <mesh position={[0, 1.55, 0.05]}>
-          <planeGeometry args={[2.78, 1.78]} />
-          <meshStandardMaterial map={tex} roughness={0.9} />
-        </mesh>
-        <Box p={[-1.2, 0.5, 0]} s={[0.06, 1, 0.06]} c={C.metal} />
-        <Box p={[1.2, 0.5, 0]} s={[0.06, 1, 0.06]} c={C.metal} />
-      </group>
-      <Plant p={[17, 0, 1.2]} s={1.1} />
-      <Plant p={[8, 0, 1.1]} s={0.9} palm={false} />
-      <BladeSign x={6.1} z={-2} text="TECH LAB" />
-    </group>
-  );
-}
-
-function Operations() {
-  const tex = useTextTexture([profile.company.toUpperCase(), profile.role, "MAY 2023 TO PRESENT", "", "REACT · NEXT.JS · REACT NATIVE", "NODE.JS · NESTJS"], { w: 760, h: 300, bg: "#F6F3EA", fg: "#26352F", size: 30, spacing: 2 });
-  return (
-    <group>
-      <group position={[-12.8, 0, -15.2]}>
-        <Box p={[0, 1.4, 0]} s={[6.4, 2.2, 0.1]} c={C.woodDark} />
-        <mesh position={[0, 1.4, 0.06]}>
-          <planeGeometry args={[6.2, 2]} />
-          <meshStandardMaterial map={tex} roughness={0.9} />
-        </mesh>
-      </group>
-      <Desk p={[-12.9, 0.05, -11]} r={[0, Math.PI, 0]} w={3} d={1.2} />
-      <Chair p={[-12.9, 0, -12.1]} r={[0, Math.PI, 0]} c={C.greenChair} />
-      <Cabinet p={[-17.5, 0, -9]} r={[0, Math.PI / 2, 0]} w={1.6} />
-      <Cabinet p={[-17.5, 0, -10.8]} r={[0, Math.PI / 2, 0]} w={1.6} />
-      <Plant p={[-8.1, 0, -14.7]} s={1} />
-      <BladeSign x={-6.1} z={-11} text="OPERATIONS" />
-    </group>
-  );
-}
-
-function MeetingRoom() {
-  const tex = useTextTexture(["LET'S TALK", "", profile.email, profile.phone], { w: 760, h: 320, bg: "#1F2A2D", fg: "#EAF3EF", size: 34, spacing: 2 });
-  return (
-    <group>
-      <group position={[12, 0, -15.3]}>
-        <Box p={[0, 1.6, 0]} s={[6.4, 2.2, 0.1]} c={C.metal} />
-        <mesh position={[0, 1.6, 0.06]}>
-          <planeGeometry args={[6.2, 2]} />
-          <meshStandardMaterial map={tex} roughness={0.6} emissive="#3E5B57" emissiveIntensity={0.35} />
-        </mesh>
-      </group>
-      <Box p={[12.5, 0.74, -11]} s={[4.8, 0.08, 2]} c={C.wood} />
-      <Box p={[12.5, 0.37, -11]} s={[0.4, 0.74, 1.2]} c={C.metal} />
-      {[-1.7, -0.6, 0.6, 1.7].map((dx) => (
-        <group key={dx}>
-          <Chair p={[12.5 + dx, 0, -12.3]} r={[0, Math.PI, 0]} c={C.greenChair} />
-          <Chair p={[12.5 + dx, 0, -9.7]} c={C.terracotta} />
-        </group>
-      ))}
-      <Plant p={[17, 0, -7.4]} s={1.1} />
-      <Plant p={[17, 0, -14.8]} s={1} palm={false} />
-      <BladeSign x={6.1} z={-11} text="MEETING ROOM" w={2.2} />
-    </group>
-  );
-}
-
-function BossCabin() {
-  const plate = useTextTexture([profile.name.toUpperCase(), profile.role.toUpperCase()], { w: 640, h: 120, bg: "#2E4D41", fg: "#F3F0E8", size: 34, spacing: 3 });
-  return (
-    <group>
-      <Box p={[0, 0.01, -12.6]} s={[7, 0.02, 5]} c="#3C6154" cast={false} />
-      <Desk p={[0, 0.05, -13.9]} r={[0, Math.PI, 0]} w={4} d={1.4} />
-      <Chair p={[0, 0, -14.9]} r={[0, Math.PI, 0]} c="#3A3F44" />
-      <Person position={[0, 0, -14.9]} yaw={0} seated typing shirt="#F2F0EA" pants="#2B3238" skin={C.skin[1]} hair="#1A1614" sleeves="short" label={profile.name.toUpperCase()} />
-      <mesh position={[0, 0.93, -13.15]}>
-        <planeGeometry args={[1.5, 0.28]} />
-        <meshStandardMaterial map={plate} roughness={0.8} />
-      </mesh>
-      <Bookshelf p={[-2.5, 0, -15.7]} w={3.4} />
-      <Bookshelf p={[2.5, 0, -15.7]} w={3.4} />
-      <Sofa p={[-4.2, 0, -11]} r={[0, -Math.PI / 2, 0]} w={2} />
-      <Plant p={[4.2, 0, -9.9]} s={1.2} />
-      <Plant p={[4.2, 0, -14.4]} s={1} palm={false} />
-      <BladeSign x={0} z={-9} text="BOSS CABIN" />
-    </group>
-  );
-}
-
-function Lobby({ director }: { director: Director }) {
-  const tex = useTextTexture(["RECEPTION"], { w: 420, h: 100, bg: "#8FB1A6", size: 38 });
-  const sign = useTextTexture(["ABDULLAH OFFICE"], { w: 1000, h: 180, bg: "#8FB1A6", size: 82, spacing: 6 });
-  const floor = useMemo(() => {
-    const t = makeTexture(512, 512, (ctx, w, h) => {
-        ctx.fillStyle = "#EEEBE2";
-        ctx.fillRect(0, 0, w, h);
-        ctx.strokeStyle = "rgba(160,140,110,0.18)";
-        ctx.lineWidth = 2;
-        for (let x = 0; x <= w; x += 64) {
-          ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, h);
-          ctx.stroke();
-        }
-    });
-    t.wrapS = t.wrapT = RepeatWrapping;
-    t.repeat.set(9, 6.5);
-    return t;
+export function Building({ director }: { director: Director }) {
+  const geo = useMemo(() => {
+    const b = makeBuilders();
+    for (const w of walls) wallShapes(b, w);
+    lights(b);
+    // entrance posts either side of the sliding doors
+    for (const sx of [-1, 1]) b.solid.box(sx * (ENTRANCE.x1 + 0.12), 1.25, ENTRANCE.z, 0.24, 2.5, 0.3, CREAM);
+    return { solid: b.solid.build(), glass: b.glass.build(), glow: b.glow.build() };
   }, []);
   return (
     <group>
-      <Plane p={[0, 0.005, -3]} s={[36, 26]} c="#FFFFFF" map={floor} />
-      <Plane p={[0, 0.012, -3.5]} s={[2.6, 25]} c="#E0DBCD" />
-      <Plane p={[0, 0.013, 7.6]} s={[6.6, 3.4]} c="#86A99D" />
-      {/* reception desk */}
-      <Box p={[0, 0.5, 5.3]} s={[5.2, 1.0, 1.1]} c="#F1EDE3" />
-      <Box p={[0, 1.04, 5.3]} s={[5.4, 0.08, 1.3]} c={C.wood} />
-      {Array.from({ length: 14 }).map((_, i) => (
-        <Box key={i} p={[-2.4 + i * 0.37, 0.5, 5.9]} s={[0.12, 0.9, 0.06]} c={C.wood} cast={false} />
+      {floors.map((p, i) => (
+        <Floor key={i} p={p} />
       ))}
-      <mesh position={[0, 0.62, 5.95]}>
-        <planeGeometry args={[2.1, 0.5]} />
-        <meshStandardMaterial map={tex} />
-      </mesh>
-      <Box p={[0.9, 1.3, 5.1]} s={[0.55, 0.36, 0.04]} c="#22272B" emissive="#7FB5C9" ei={0.3} />
-      <Chair p={[0, 0, 4.2]} r={[0, Math.PI, 0]} c="#2D5C8F" />
-      <Person position={[0, 0, 4.2]} yaw={0} seated typing {...RECEPTIONIST} label="RECEPTIONIST" hideWhen={() => director.guide.active} />
-      {/* lobby seating */}
-      <Sofa p={[-10, 0, 6]} r={[0, -Math.PI / 2, 0]} w={2.6} c="#4F7C6C" />
-      <Sofa p={[10, 0, 6]} r={[0, Math.PI / 2, 0]} w={2.6} c="#4F7C6C" />
-      <Cyl p={[-8.4, 0.3, 6]} rad={0.6} h={0.06} c={C.wood} />
-      <Cyl p={[8.4, 0.3, 6]} rad={0.6} h={0.06} c={C.wood} />
-      <Plant p={[-16.5, 0, 8.6]} s={1.3} />
-      <Plant p={[16.5, 0, 8.6]} s={1.3} />
-      <Plant p={[-4.6, 0, 7.4]} s={1.1} />
-      <Plant p={[4.6, 0, 7.4]} s={1.1} palm={false} />
-      {/* office name boards on the street-facing wall */}
-      <group position={[-9, 0.72, 10.14]}>
-        <Box s={[5.4, 0.98, 0.06]} c={C.woodDark} />
-        <mesh position={[0, 0, 0.04]}>
-          <planeGeometry args={[5.25, 0.85]} />
-          <meshStandardMaterial map={sign} />
-        </mesh>
-      </group>
-      <group position={[9, 0.72, 10.14]}>
-        <Box s={[5.4, 0.98, 0.06]} c={C.woodDark} />
-        <mesh position={[0, 0, 0.04]}>
-          <planeGeometry args={[5.25, 0.85]} />
-          <meshStandardMaterial map={sign} />
-        </mesh>
-      </group>
-    </group>
-  );
-}
-
-function OpenOffice() {
-  return (
-    <group>
-      {workstations.map((w, i) => (
-        <group key={i}>
-          <Desk p={[w.x, 0.05, w.z]} />
-          <Chair p={[w.x, 0, w.z + 0.95]} c={i % 2 ? C.terracotta : C.greenChair} />
-          {w.seated && (
-            <Person
-              position={[w.x, 0, w.z + 0.95]}
-              yaw={Math.PI}
-              seated
-              typing
-              shirt={w.shirt}
-              pants="#33414F"
-              skin={C.skin[i % 4]}
-              hair={["#201B18", "#4A3426", "#15110F", "#6B4A32"][i % 4]}
-              female={i % 3 === 1}
-              hairStyle={i % 3 === 1 ? (i % 2 ? "bun" : "long") : i % 4 === 2 ? "buzz" : "short"}
-              sleeves={i % 2 ? "short" : "long"}
-            />
-          )}
-        </group>
-      ))}
-      <Plant p={[-6.4, 0, 2.9]} s={1.1} />
-      <Plant p={[6.4, 0, 2.9]} s={1.1} palm={false} />
-    </group>
-  );
-}
-
-export function Building({ director, onProject }: { director: Director; onProject: (i: number) => void }) {
-  return (
-    <group>
-      <Lobby director={director} />
-      {walls.map((w, i) => (
-        <WallSegment key={i} w={w} />
-      ))}
-      {/* room floors */}
-      <Plane p={[-12.5, 0.012, -2.25]} s={[11, 8.5]} c="#DCE8E2" />
-      <Plane p={[12.5, 0.012, -2.25]} s={[11, 8.5]} c="#DEE5EC" />
-      <Plane p={[-12.5, 0.012, -11.25]} s={[11, 9.5]} c="#EBE3D3" />
-      <Plane p={[12.5, 0.012, -11.25]} s={[11, 9.5]} c="#DCE8E2" />
-      <Plane p={[0, 0.012, -12.5]} s={[10, 7]} c="#D6BC93" />
-      <OpenOffice />
-      <WorkStudio onProject={onProject} />
-      <TechLab />
-      <Operations />
-      <MeetingRoom />
-      <BossCabin />
+      <mesh geometry={geo.solid} material={solidMat} castShadow receiveShadow />
+      <mesh geometry={geo.glass} material={glassMat} renderOrder={2} />
+      <mesh geometry={geo.glow} material={glowMat} />
       {Object.values(doors).map((d) => (
         <DoorUnit key={d.id} d={d} director={director} />
       ))}
+      <EntranceDoors director={director} />
     </group>
   );
 }

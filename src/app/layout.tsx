@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Newsreader } from "next/font/google";
 import "./globals.css";
+import "./ui.css";
 import { profile } from "@/content/profile";
 
 const display = Newsreader({ subsets: ["latin"], variable: "--font-display", display: "swap" });

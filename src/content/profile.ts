@@ -4,11 +4,11 @@ export const profile = {
   role: "Full Stack Developer",
   location: "Burewala, Pakistan",
   email: "abdullahmalik0206@gmail.com",
-  phone: "+92 303 9419903",
+  phone: "0303 9419903",
   phoneIntl: "+923039419903",
   whatsappUrl: "https://wa.me/923039419903",
   linkedinUrl: "https://linkedin.com/in/muhammad-abdullah-ab7978255",
-  linkedinLabel: "muhammad-abdullah-ab7978255",
+  linkedinLabel: "linkedin.com/in/muhammad-abdullah-ab7978255",
   company: "BurjSoft",
   // Month is 1-based. Used for the live tenure counter.
   startedAt: { year: 2023, month: 5 },
@@ -22,12 +22,15 @@ export const profile = {
     "Across catering, brand consulting, dental education, home services and invoicing, working with backend engineers, designers and product owners.",
 } as const;
 
-export const nav = [
-  { href: "#work", label: "Work" },
-  { href: "#experience", label: "Experience" },
-  { href: "#skills", label: "Skills" },
-  { href: "#contact", label: "Contact" },
-] as const;
+/** Office name on the big board by the gate. */
+export const officeName = "ABDULLAH OFFICE";
+
+/** Host of the deployed site (from NEXT_PUBLIC_SITE_URL), shown under the office name when it is a real domain. */
+export const siteHost = (() => {
+  const url = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  if (!url || /example\.com|localhost|127\.0\.0\.1/.test(url)) return "";
+  return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+})();
 
 export const facts = [
   {
@@ -50,7 +53,15 @@ export const facts = [
   },
 ] as const;
 
+/** Short facts for the lounge, all taken from the CV. */
+export const quickFacts = [
+  "Based in Burewala, Pakistan.",
+  "Full stack developer at BurjSoft since May 2023.",
+  "Five products across catering, brand consulting, dental education, field services and invoicing.",
+  "Web and mobile from one toolkit: React, Next.js, React Native and NestJS.",
+] as const;
+
 export const marquee = [
   "JavaScript", "TypeScript", "React.js", "Next.js", "React Native", "Node.js",
-  "NestJS", "Tailwind CSS", "Material UI", "Bootstrap", "REST APIs", "Git",
+  "NestJS", "PostgreSQL", "Docker", "Tailwind CSS", "Material UI", "Bootstrap", "REST APIs", "Git",
 ] as const;

@@ -6,3 +6,6 @@ out
 Dockerfile
 docker-compose.yml
 README.md
+assets-src
+.claude
+docs
