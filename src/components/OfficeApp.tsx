@@ -69,6 +69,10 @@ export function OfficeApp() {
   const look = useMemo(() => visitorLooks.find((l) => l.id === lookId) ?? visitorLooks[0], [lookId]);
   const { director, rig } = sim;
   useEffect(() => {
+    // development only: lets browser tests fast-forward the simulation
+    if (process.env.NODE_ENV !== "production") (window as unknown as { __office?: typeof sim }).__office = sim;
+  }, []);
+  useEffect(() => {
     sim.director.setVisitorSex(sexOf(look.look.body));
   }, [look]);
 

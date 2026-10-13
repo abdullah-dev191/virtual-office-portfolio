@@ -411,7 +411,8 @@ export class Director {
           return false;
         }
         let v = s.speed ?? WALK;
-        if (s.follow) v *= clamp((dist(a.pos, s.follow.pos) - (s.gap ?? 1.6)) / 0.7, 0, 1);
+        // hang back while the leader walks; once they have stopped, walk up to them
+        if (s.follow && s.follow.anim === "Walk") v *= clamp((dist(a.pos, s.follow.pos) - (s.gap ?? 1.6)) / 0.7, 0.05, 1);
         if (s.doors) {
           const door = d.closedDoorAhead(a, path, i, 1.05);
           if (door) {

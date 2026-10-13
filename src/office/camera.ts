@@ -110,7 +110,7 @@ export class CameraRig {
       const dist = (6.2 + span * 1.1) * this.zoom * far;
       const half = dist * Math.tan((vp.fov * Math.PI) / 360);
       // push the subject away from the card: left of centre on desktop, upper half on phones
-      const dx = this.cardSide === "right" ? half * (vp.width / vp.height) * 0.36 : 0;
+      const dx = this.cardSide === "right" ? half * (vp.width / vp.height) * 0.15 : 0;
       const dz = this.cardSide === "bottom" ? half * 0.55 : 0;
       return { tx: mx + dx, ty: 0.6, tz: mz + dz, dist, pitch: 0.86, yaw: 0 };
     }
