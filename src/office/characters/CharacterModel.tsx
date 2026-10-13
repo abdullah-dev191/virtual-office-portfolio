@@ -66,32 +66,28 @@ function blob() {
 const blobGeometry = new PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 
 /** Security cap: built in body space, then parented to the head bone so it follows every clip. */
-function attachCap(mesh: SkinnedMesh, head: Bone) {
-  const cap = new Group();
+function attachCap(root: Object3D, head: Bone) {
   const navy = new MeshStandardMaterial({ color: "#1B2433", roughness: 0.7 });
   const black = new MeshStandardMaterial({ color: "#0F1216", roughness: 0.5 });
-  const gold = new MeshStandardMaterial({ color: "#C9A46A", roughness: 0.4, metalness: 0.4 });
-  const crown = new Mesh(new SphereGeometry(0.128, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), navy);
-  crown.scale.set(1, 0.62, 1.04);
-  crown.position.set(0, 1.735, 0.012);
-  const band = new Mesh(new CylinderGeometry(0.129, 0.129, 0.05, 20), black);
-  band.position.set(0, 1.735, 0.012);
-  const brim = new Mesh(new CylinderGeometry(0.11, 0.11, 0.012, 20, 1, false, -Math.PI / 2, Math.PI), black);
-  brim.scale.set(1, 1, 1.1);
-  brim.position.set(0, 1.716, 0.07);
-  const badge = new Mesh(new CylinderGeometry(0.02, 0.02, 0.006, 12).rotateX(Math.PI / 2), gold);
-  badge.position.set(0, 1.77, 0.135);
+  const gold = new MeshStandardMaterial({ color: "#C9A46A", roughness: 0.35, metalness: 0.5 });
+  // Built around the head's world position in the clone's pose (the character faces +z), then re-expressed in
+  // the head bone's own space so it follows every clip.
+  root.updateWorldMatrix(true, true);
+  const hp = head.getWorldPosition(new Vector3());
+  const cap = new Group();
+  const crown = new Mesh(new SphereGeometry(0.162, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), navy);
+  crown.scale.set(1, 0.82, 1.1);
+  crown.position.set(hp.x, hp.y + 0.15, hp.z + 0.005);
+  const band = new Mesh(new CylinderGeometry(0.163, 0.163, 0.05, 24), black);
+  band.position.set(hp.x, hp.y + 0.15, hp.z + 0.005);
+  const brim = new Mesh(new CylinderGeometry(0.14, 0.14, 0.014, 24, 1, false, 0, Math.PI), black);
+  brim.scale.set(1, 1, 1.05);
+  brim.position.set(hp.x, hp.y + 0.13, hp.z + 0.1);
+  const badge = new Mesh(new CylinderGeometry(0.022, 0.022, 0.008, 14).rotateX(Math.PI / 2), gold);
+  badge.position.set(hp.x, hp.y + 0.19, hp.z + 0.178);
   cap.add(crown, band, brim, badge);
   cap.traverse((o) => ((o as Mesh).castShadow = true));
-  // body space -> head bone space, using the bind pose of the head
-  mesh.updateWorldMatrix(true, false);
-  const i = mesh.skeleton.bones.indexOf(head);
-  const headBind = new Matrix4().copy(mesh.matrixWorld).multiply(new Matrix4().copy(mesh.skeleton.boneInverses[i]).invert());
-  const rootInv = new Matrix4();
-  let root: Object3D = mesh;
-  while (root.parent) root = root.parent;
-  rootInv.copy(root.matrixWorld).invert();
-  cap.applyMatrix4(new Matrix4().copy(headBind).premultiply(rootInv).invert());
+  cap.applyMatrix4(new Matrix4().copy(head.matrixWorld).invert());
   head.add(cap);
 }
 
@@ -136,7 +132,7 @@ export function CharacterModel({ puppet, look, label, tone = "role", labelRange 
     m.frustumCulled = false;
     const head = root.getObjectByName("Head") as Bone;
     const neck = root.getObjectByName("Neck") as Bone;
-    if (look.cap) attachCap(m, head);
+    if (look.cap) attachCap(root, head);
     const mixer = new AnimationMixer(root);
     const actions = new Map<string, AnimationAction>();
     for (const c of anim.animations) actions.set(c.name, mixer.clipAction(c));

@@ -1,12 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { departments, tour, type DeptId, type PlaceId } from "@/content/departments";
 import { profile } from "@/content/profile";
 import type { Preset } from "@/office/camera";
-import { sexOf } from "@/office/characters/rig";
-import { visitorLooks } from "@/office/characters/roster";
+import { visitorLook } from "@/office/characters/roster";
 import type { Phase } from "@/office/director";
 import { hostSeat, visitorSeat } from "@/office/layout";
 import { QUALITY, autoQuality, type Quality } from "@/office/quality";
@@ -19,7 +18,6 @@ const Scene = dynamic(() => import("@/office/world/Scene"), { ssr: false });
 
 type Mode = "boot" | "office" | "classic";
 const QUALITY_KEY = "office.quality";
-const LOOK_KEY = "office.look";
 
 function hasWebGL() {
   try {
@@ -50,7 +48,6 @@ export function OfficeApp() {
   const [webgl, setWebgl] = useState(false);
   const [reduced, setReduced] = useState(false);
   const [quality, setQuality] = useState<Quality>("high");
-  const [lookId, setLookId] = useState(visitorLooks[0].id);
   const [ready, setReady] = useState(false);
   const [phase, setPhase] = useState<Phase>("intro");
   const [place, setPlace] = useState<PlaceId | null>(null);
@@ -66,22 +63,17 @@ export function OfficeApp() {
   const [wide, setWide] = useState(true);
   const demoRef = useRef(false);
 
-  const look = useMemo(() => visitorLooks.find((l) => l.id === lookId) ?? visitorLooks[0], [lookId]);
   const { director, rig } = sim;
   useEffect(() => {
     // development only: lets browser tests fast-forward the simulation
     if (process.env.NODE_ENV !== "production") (window as unknown as { __office?: typeof sim }).__office = sim;
   }, []);
-  useEffect(() => {
-    sim.director.setVisitorSex(sexOf(look.look.body));
-  }, [look]);
 
   // first client render: decide between the office and the classic page
   useEffect(() => {
     const gl = hasWebGL();
     const rm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const q = (readStore(QUALITY_KEY) as Quality | null) ?? autoQuality();
-    const l = readStore(LOOK_KEY);
     /* eslint-disable react-hooks/set-state-in-effect */
     setWebgl(gl);
     setReduced(rm);
@@ -89,7 +81,6 @@ export function OfficeApp() {
       sim.setQuality(q);
       setQuality(q);
     }
-    if (l && visitorLooks.some((v) => v.id === l)) setLookId(l);
     setWide(window.innerWidth >= 760);
     setMode(gl && !rm ? "office" : "classic");
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -252,10 +243,6 @@ export function OfficeApp() {
     sim.setQuality(q);
     setQuality(q);
   };
-  const setLook = (id: string) => {
-    writeStore(LOOK_KEY, id);
-    setLookId(id);
-  };
 
   const sr = (
     <div className="sr-only">
@@ -310,7 +297,7 @@ export function OfficeApp() {
           traffic={sim.traffic}
           game={sim.game}
           quality={quality}
-          visitorLook={look.look}
+          visitorLook={visitorLook}
           panMode={panMode}
           onProject={onProject}
           onReady={() => setReady(true)}
@@ -321,7 +308,7 @@ export function OfficeApp() {
 
       {showPlaces && <PlaceList current={current} onGo={goTo} onPreset={onPreset} open={placesOpen} onToggle={() => setPlacesOpen((v) => !v)} />}
 
-      {phase === "intro" && ready && <WelcomeCard lookId={lookId} onLook={setLook} onSkip={skip} />}
+      {phase === "intro" && ready && <WelcomeCard onSkip={skip} />}
       {phase === "reception" && following && <ReceptionCard onRoom={goTo} onBoss={() => goTo("boss")} onExplore={() => director.explore()} />}
       {phase === "visit" && following && <VisitCard title={target || "On the move"} sub={status} onSkip={skip} />}
       {phase === "leaving" && <VisitCard eyebrow="LEAVING" title="Heading out…" sub="Thanks for stopping by." onSkip={skip} />}

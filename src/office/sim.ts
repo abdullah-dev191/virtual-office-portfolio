@@ -4,14 +4,14 @@
  */
 import { CameraRig } from "./camera";
 import { sexOf } from "./characters/rig";
-import { footballerLook, pedestrianLook, visitorLooks } from "./characters/roster";
+import { footballerLook, pedestrianLook, visitorLook } from "./characters/roster";
 import { Director } from "./director";
 import { Football } from "./football";
 import { QUALITY, type Quality } from "./quality";
 import { Traffic } from "./traffic";
 
 export class Sim {
-  director = new Director(sexOf(visitorLooks[0].look.body));
+  director = new Director(sexOf(visitorLook.body));
   rig = new CameraRig();
   game = new Football((team, i) => sexOf(footballerLook(team, i).body));
   quality: Quality = "high";

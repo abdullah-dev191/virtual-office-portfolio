@@ -286,60 +286,6 @@ export const BODIES = {
       }
     ]
   },
-  "punk": {
-    "sex": "f",
-    "url": "/models/people/punk.glb",
-    "slots": [
-      {
-        "role": "skin",
-        "color": "#cead86"
-      },
-      {
-        "role": "top",
-        "color": "#681d65"
-      },
-      {
-        "role": "accent",
-        "color": "#312e2b"
-      },
-      {
-        "role": "shoes",
-        "color": "#312e2b"
-      },
-      {
-        "role": "sole",
-        "color": "#3f3f3f"
-      },
-      {
-        "role": "skin",
-        "color": "#cead86"
-      },
-      {
-        "role": "hair",
-        "color": "#681d65"
-      },
-      {
-        "role": "hair2",
-        "color": "#312e2b"
-      },
-      {
-        "role": "brows",
-        "color": "#3e3429"
-      },
-      {
-        "role": "eyes",
-        "color": "#31251c"
-      },
-      {
-        "role": "skin",
-        "color": "#cead86"
-      },
-      {
-        "role": "bottom",
-        "color": "#312e2b"
-      }
-    ]
-  },
   "explorer": {
     "sex": "f",
     "url": "/models/people/explorer.glb",

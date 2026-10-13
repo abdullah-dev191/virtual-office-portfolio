@@ -17,20 +17,18 @@ export type Look = {
 };
 
 export const SKIN = {
-  fair: "#F1C7A0",
-  light: "#E0AC86",
-  wheat: "#C99068",
-  tan: "#B07650",
-  brown: "#8D5A3B",
-  deep: "#6B4430",
+  fair: "#EFCBAE",
+  light: "#DDB293",
+  wheat: "#C7977A",
+  tan: "#AA7C5C",
+  brown: "#80583F",
+  deep: "#5D3E2E",
 } as const;
 
 export const HAIR = {
   black: "#1A1614",
   dark: "#2B1D16",
   brown: "#4A3426",
-  chestnut: "#6B4A32",
-  auburn: "#7A3B22",
-  blond: "#C9A46A",
-  grey: "#8E8A86",
+  chestnut: "#5E4130",
+  auburn: "#6B3A24",
 } as const;

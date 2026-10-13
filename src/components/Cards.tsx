@@ -2,24 +2,14 @@
 
 import { useEffect, useRef } from "react";
 import { departments, menuRooms, reception, tour, welcome, type DeptId } from "@/content/departments";
-import { visitorLooks } from "@/office/characters/roster";
 import { RoomBody } from "./RoomContent";
 
-export function WelcomeCard({ lookId, onLook, onSkip }: { lookId: string; onLook: (id: string) => void; onSkip: () => void }) {
+export function WelcomeCard({ onSkip }: { onSkip: () => void }) {
   return (
     <section className="card" aria-labelledby="welcome-title">
       <p className="eyebrow">{welcome.eyebrow}</p>
       <h2 id="welcome-title">{welcome.title}</h2>
       <p className="sub">{welcome.walking}</p>
-      <div className="looks" role="radiogroup" aria-label={welcome.pick}>
-        <span className="looks-label">{welcome.pick}</span>
-        {visitorLooks.map((l) => (
-          <button key={l.id} role="radio" aria-checked={l.id === lookId} className={`look${l.id === lookId ? " on" : ""}`} onClick={() => onLook(l.id)} title={l.name}>
-            <i style={{ background: l.swatch }} aria-hidden />
-            <span>{l.name}</span>
-          </button>
-        ))}
-      </div>
       <button className="pillbtn" onClick={onSkip}>
         {welcome.skip}
       </button>

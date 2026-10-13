@@ -131,5 +131,4 @@ export const welcome = {
   title: "Welcome to the office",
   walking: "Walking to reception…",
   skip: "Skip to reception ↗",
-  pick: "Pick your look",
 };

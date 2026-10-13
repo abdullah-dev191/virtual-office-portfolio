@@ -74,14 +74,6 @@ const BODIES = [
     roles: { "Body:White": "top", "Feet:Grey": "shoes", Hair_Blond: "hair", Hair_Brown: "hair2", "Head:Brown": "brows", "Legs:Orange": "bottom", Skin: "skin" },
   },
   {
-    key: "punk", sex: "f", page: "https://poly.pizza/m/djXoqejw6w", rid: "1d368679-1d9a-4d5c-9095-877144b02d00",
-    sha: "77cbb6838bf207fc948848ddb389ea43d4bb30c52ec62c5a2fc84bbf35c88c52",
-    roles: {
-      "Body:Pink": "top", "Body:Black": "accent", "Head:Pink": "hair", "Head:Black": "hair2", Hair_Brown: "brows", "Head:Brown": "eyes",
-      "Legs:Black": "bottom", "Feet:Black": "shoes", "Feet:Grey": "sole", Skin: "skin",
-    },
-  },
-  {
     key: "explorer", sex: "f", page: "https://poly.pizza/m/ZwF0K7WBmu", rid: "69689495-028d-4b81-8678-792338a5693e",
     sha: "38e4e6429d8af5849bb23e9585266f8c17dfe3e987bda89dec58f606aaedcf31",
     roles: {
@@ -614,6 +606,66 @@ function bakeIntoBindSpace(prim, M) {
   }
 }
 
+/**
+ * Hair transplants: the casual body's own hair is a ponytail, so it gets the neat short cut from the suit body.
+ * Both share one skeleton and the same head size, so the mesh drops straight on.
+ */
+const HAIR_FROM = { casual: "suit" };
+async function donorHair(key) {
+  const donor = await io().read(join(SRC, `${key}.glb`));
+  for (const n of donor.getRoot().listNodes()) {
+    const m = n.getMesh();
+    if (!m || !/Head/.test(m.getName())) continue;
+    for (const p of m.listPrimitives()) if (p.getMaterial().getName() === "Hair") return { prim: p, joints: n.getSkin().listJoints().map((j) => j.getName()) };
+  }
+  throw new Error(`no Hair primitive in ${key}`);
+}
+function transplantHair(prim, from, myJoints) {
+  if (from.joints.length !== myJoints.length || from.joints.some((j, i) => j !== myJoints[i])) throw new Error("hair donor uses a different skeleton");
+  for (const sem of ["POSITION", "NORMAL", "JOINTS_0", "WEIGHTS_0"]) prim.getAttribute(sem).setArray(from.prim.getAttribute(sem).getArray().slice());
+  prim.getIndices().setArray(from.prim.getIndices().getArray().slice());
+}
+
+/**
+ * Softens the faceted look: normals of vertices that share a position (and a palette slot) are averaged when the
+ * faces meet at less than SMOOTH_ANGLE, so cloth and skin read as rounded while seams between clothes stay crisp.
+ */
+const SMOOTH_ANGLE = (62 * Math.PI) / 180;
+function smoothNormals(prim) {
+  const pos = prim.getAttribute("POSITION");
+  const nrm = prim.getAttribute("NORMAL");
+  const ids = prim.getAttribute("_MATID");
+  const n = pos.getCount();
+  const key = (i) => {
+    const p = pos.getElement(i, []);
+    return `${Math.round(p[0] * 2e4)}|${Math.round(p[1] * 2e4)}|${Math.round(p[2] * 2e4)}|${ids.getElement(i, [])[0]}`;
+  };
+  const groups = new Map();
+  for (let i = 0; i < n; i++) {
+    const k = key(i);
+    (groups.get(k) ?? groups.set(k, []).get(k)).push(i);
+  }
+  const orig = Array.from({ length: n }, (_, i) => nrm.getElement(i, []));
+  const cos = Math.cos(SMOOTH_ANGLE);
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    for (const i of g) {
+      const a = orig[i];
+      let x = 0, y = 0, z = 0;
+      for (const j of g) {
+        const b = orig[j];
+        if (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] >= cos) {
+          x += b[0];
+          y += b[1];
+          z += b[2];
+        }
+      }
+      const l = Math.hypot(x, y, z) || 1;
+      nrm.setElement(i, [x / l, y / l, z / l]);
+    }
+  }
+}
+
 /** Merges a body's four skinned meshes into one primitive with a palette slot per vertex. */
 async function buildBody(body) {
   await MeshoptEncoder.ready;
@@ -624,6 +676,7 @@ async function buildBody(body) {
   const meshNodes = root.listNodes().filter((n) => n.getMesh());
   const skins = meshNodes.map((n) => n.getSkin());
   const deltas = skins.map((s) => skinDelta(skins[0], s, body.key));
+  const hairDonor = HAIR_FROM[body.key] ? await donorHair(HAIR_FROM[body.key]) : null;
   const material = doc.createMaterial("person").setBaseColorFactor([1, 1, 1, 1]).setRoughnessFactor(0.82).setMetallicFactor(0);
   const slots = [];
   const slotOf = new Map();
@@ -640,6 +693,7 @@ async function buildBody(body) {
         const role = body.roles[key] ?? body.roles[mat.getName()] ?? key;
         slots.push({ key, role, color: linearToHex(mat.getBaseColorFactor()) });
       }
+      if (hairDonor && mat.getName() === "Hair") transplantHair(prim, hairDonor, node.getSkin().listJoints().map((j) => j.getName()));
       const count = prim.getAttribute("POSITION").getCount();
       for (const sem of prim.listSemantics()) if (!KEEP_ATTRS.has(sem)) prim.setAttribute(sem, null);
       const joints = prim.getAttribute("JOINTS_0");
@@ -651,6 +705,7 @@ async function buildBody(body) {
   }
   if (slots.length > 24) throw new Error(`${body.key}: too many palette slots`);
   const joined = joinPrimitives(prims);
+  smoothNormals(joined);
   const mesh = doc.createMesh(body.key).addPrimitive(joined);
   const keep = meshNodes[0];
   keep.setMesh(mesh).setName(body.key);
